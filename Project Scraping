@@ -1,0 +1,208 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from bs4 import BeautifulSoup
+import requests
+import re
+from collections import defaultdict
+from pprint import pprint
+
+#Function to get a value
+
+def get_movie_value(soup, field_name):
+    obj = soup.find(text=re.compile(field_name))
+    if not obj:
+        return None
+    next_sibling = obj.findNextSibling()
+    if next_sibling:
+        return next_sibling.text
+    else:
+        return None
+
+#Formatting data
+
+import dateutil.parser
+
+def to_date(datestring):
+    date = dateutil.parser.parse(datestring)
+    return date
+
+def money_to_int(moneystring):
+    moneystring = moneystring.replace('$','').replace(',','')
+    return int(moneystring)
+
+def runtime_to_min(runtimestring):
+    runtime = runtimestring.split()
+    try:
+        minutes = int(runtime[0])*60 + int(runtime[2])
+        return minutes
+    except:
+        return None
+
+#Get URLS of top 100 grossing movies per year in last 20 years
+movie_urls = []
+
+years = list(range(1996,2017))
+
+for year in years:
+    url = 'http://www.boxofficemojo.com/yearly/chart/?yr=' + str(year) + '&p=.htm'
+    response = requests.get(url)
+    page = response.text
+    soup = BeautifulSoup(page)
+
+    tables = soup.find_all("table")
+
+    url_name = re.findall(r'/movies/\?id=([\w\- ]+).htm', str(tables[3]))
+    for url in url_name:
+        movie_urls.append(url)
+
+for movie in movie_urls:
+    if 'starwars' in movie:
+        movie2 = movie.replace('se','')
+        movie_urls.remove(movie)
+        movie_urls.append(movie2)
+
+print(len(movie_urls), movie_urls)
+
+
+#Making DF of all the movies
+
+movie_data = []
+errors = []
+
+for movie in movie_urls:
+
+    #Making soup of movie page
+    url = 'http://www.boxofficemojo.com/movies/?id=' + movie + '.htm'
+    response = requests.get(url)
+    page = response.text
+    soup = BeautifulSoup(page)
+
+
+    #Getting Tables
+    tables = soup.find_all("table")
+
+
+    #Getting title of movie
+    title_string = soup.find('title').text
+    title = (title_string.split('(')[0].strip())
+
+
+    #Print Title of movie currently getting
+    print("Getting " + title)
+
+
+    #Getting composer of movie
+    composer = re.findall(r'Composer.+htm">([\w\- ]+)<', str(soup))
+    try:
+        composer = composer[0]
+    except:
+        composer = 'None'
+
+
+    #Getting Release Year
+    raw_release_date = get_movie_value(soup, 'Release Date')
+    release_date = to_date(raw_release_date)
+    release_year = release_date.year
+
+
+    #Getting Domestic Total
+    #Getting Domestic Lifetime Gross
+    if (soup.find(text=re.compile('Domestic Lifetime Gross')) != None):
+        lifetime_gross = re.findall(r'Domestic Lifetime Gross: ([\w\-\$\, ]+)<', str(soup))
+        raw_domestic_total = lifetime_gross[0]
+
+    #As Of (Estimate)
+    elif (soup.find(text=re.compile('\(Estimate\)'))):
+        numbers = re.findall(r'>([\$\,\w]+) \(Estimate\)', str(tables[3]))
+        raw_domestic_total = numbers[0]
+
+    #Getting 'as of'
+    elif (soup.find(text=re.compile('Domestic Total as of'))) != None:
+        numbers = re.findall(r'Domestic Total as of [\w\-\$\,\. ]+:</font> <b>([\$\,\w]+)<', str(tables[0]))
+        raw_domestic_total = numbers[0]
+
+    #Getting Regular Domestic Total
+    elif (soup.find(text=re.compile('Domestic Total'))) != None:
+        raw_domestic_total = get_movie_value(soup, 'Domestic Total')
+
+    domestic_total_gross = money_to_int(raw_domestic_total)
+
+
+    #Getting Runtime
+    raw_runtime = get_movie_value(soup, 'Runtime')
+    runtime = runtime_to_min(raw_runtime)
+
+
+    #Getting Production Budget
+    raw_budget = (get_movie_value(soup, 'Production Budget'))
+    if '.' in raw_budget:
+        raw_budget = raw_budget.replace('.','')
+        raw_budget = raw_budget.replace(' million', '00000')
+    elif ' million' in raw_budget:
+        raw_budget = raw_budget.replace(' million', '000000')
+
+    if (raw_budget != 'N/A'):
+        budget = money_to_int(raw_budget)
+    else:
+        budget = raw_budget
+
+
+    #Find Yearly Rank
+    #If not within last 365 days
+    if ((soup.find(text = re.compile('Yearly [\d]+'))) != None):
+        #If in top 10 that year (bold)
+        if re.findall(r'Yearly [\w]+</([\w\<\>\/])>', str(tables[7]))[0] == 'b':
+            yearly_rank = re.findall(r'Yearly [\w]+</b></a></font></td>\n<td align="center"><font size="2"><b>([\w \,]+)</', str(tables[7]))
+
+        #If not top 10 that year
+        if re.findall(r'Yearly [\w]+</([\w\<\>\/])>', str(tables[7]))[0] != 'b':
+            yearly_rank = re.findall(r'Yearly [\w]+</a></font></td>\n<td align="center"><font size="2">([\w \,]+)</', str(tables[7]))
+
+    #If within last 365 days
+    elif ((soup.find(text = re.compile('Top Movies in the Past'))) != None):
+        #If top 10 past 365 (bold)
+        if re.findall(r'365 Days</([\w]+)><', str(tables[7]))[0] == 'b':
+            yearly_rank = re.findall(r'365 Days</b></a></font></td>\n<td align="center"><font size="2"><b>([\w]+)</b>', str(tables[7]))
+
+        #If not top 10 past 365
+        if re.findall(r'365 Days</([\w]+)><', str(tables[7]))[0] != 'b':
+            yearly_rank = re.findall(r'365 Days</a></font></td>\n<td align="center"><font size="2">([\w]+)<', str(tables[7]))
+
+    else:
+        yearly_rank = [float('NaN')]
+
+
+    #Find adjusted rank
+    if (soup.find(text=re.compile('All Time Adjusted')) != None):
+        #If in top 10 (bold)
+        if (re.findall(r'All Time Adjusted</([\w])>', str(tables[7]))[0] != 'b'):
+            adj_rank = re.findall(r'All Time Adjusted</a></font></td>\n<td align="center"><font size="2">([\w \,]+)</', str(tables[7]))
+        #If not in top 10
+        elif (re.findall(r'All Time Adjusted</([\w])>', str(tables[7]))[0] == 'b'):
+            adj_rank = re.findall(r'All Time Adjusted</b></a></font></td>\n<td align="center"><font size="2"><b>([\w \,]+)</', str(tables[7]))
+    else:
+        adj_rank = [float('NaN')]
+
+
+    #Finding All Time Domestic Rank (unadjused)
+    if (soup.find(text=re.compile('All Time Domestic')) != None):
+        #If top 10 (Bold)
+        if(re.findall(r'All Time Domestic</([\w])>', str(tables[7]))[0] == 'b'):
+            dom_rank = re.findall(r'All Time Domestic</b></a></font></td>\n<td align="center"><font size="2"><b>([\w \,]+)</', str(tables[7]))
+        #If not top 10
+        elif(re.findall(r'All Time Domestic</([\w])>', str(tables[7]))[0] != 'b'):
+            dom_rank = re.findall(r'All Time Domestic</a></font></td>\n<td align="center"><font size="2">([\w \,]+)</', str(tables[7]))
+    else:
+        dom_rank = [float('NaN')]
+
+
+    headers = ['movie title', 'domestic total gross', 'year', 'runtime (mins)', 'composer', 'budget', 'yearly rank', 'adjusted rank', 'domestic rank']
+
+    movie_dict = dict(zip(headers, [title, domestic_total_gross, release_year, runtime, composer, budget, yearly_rank[0], adj_rank[0], dom_rank[0]]))
+    movie_data.append(movie_dict)
+
+df = pd.DataFrame(movie_data)
+
+#Saving as CSV
+df.to_csv('movie_data.csv')
