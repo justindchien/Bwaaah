@@ -4,4 +4,4 @@
 * Cleaning_Movie_DF sets up the scraped data for analysis
 * Project_Analysis is the code that actually analyzed the data
 
-Note: "Bwaah" is in reference to the popular musical booms made popular by Hans Zimmer in "Inception"
+Note: "Bwaaah" is in reference to the popular musical booms made popular by Hans Zimmer in "Inception"
