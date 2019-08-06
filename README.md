@@ -1,4 +1,4 @@
-# Project Luther: Does Having a Top 5 Composer Influence a Movie's Domestic Total Gross
+# Does Having a Top 5 Composer Influence a Movie's Domestic Total Gross
 
 * Project_Scraping is the code used to scrape the data from Box Office Mojo
 * Cleaning_Movie_DF sets up the scraped data for analysis
